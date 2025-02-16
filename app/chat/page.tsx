@@ -1,118 +1,104 @@
 "use client";
 
 import * as React from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Form, ScrollArea } from "radix-ui";
-import { twMerge } from "tailwind-merge";
 import { PaperPlaneIcon } from "@radix-ui/react-icons";
+import { createClient } from "@/utils/supabase/client";
+import { Database } from "@/lib/database.types";
+import { User } from "@supabase/auth-js";
+import MessageItem from "@/components/chat/MessageItem";
 
-interface Message {
-  id: string;
-  text: string;
-  sender: string;
-  timestamp: Date;
-}
+export type Message = Database["public"]["Tables"]["messages"]["Row"];
+type NewMessage = Database["public"]["Tables"]["messages"]["Insert"];
 
 export default function Chat() {
-  const [messages, setMessages] = React.useState<Message[]>([
-    {
-      id: "msg-1",
-      text: "Hey there! How was your day?",
-      sender: "Alice",
-      timestamp: new Date("2023-10-01T14:23:00Z"),
-    },
-    {
-      id: "msg-2",
-      text: "It was good, thanks for asking! How about yours?",
-      sender: "Bob",
-      timestamp: new Date("2023-10-01T14:25:00Z"),
-    },
-    {
-      id: "msg-3",
-      text: "Pretty hectic, but I managed. Did you see the game last night?",
-      sender: "Alice",
-      timestamp: new Date("2023-10-01T14:28:00Z"),
-    },
-    {
-      id: "msg-4",
-      text: "No, I missed it. How was it?",
-      sender: "Bob",
-      timestamp: new Date("2023-10-01T14:30:00Z"),
-    },
-    {
-      id: "msg-5",
-      text: "It was incredible! You should watch the highlights.",
-      sender: "Alice",
-      timestamp: new Date("2023-10-01T14:32:00Z"),
-    },
-    {
-      id: "msg-6",
-      text: "Will do! Thanks for the heads up.",
-      sender: "Bob",
-      timestamp: new Date("2023-10-01T14:35:00Z"),
-    },
-  ]);
-  const [input, setInput] = React.useState("");
-  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const [user, setUser] = useState<User>();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  const supabase = createClient();
+
+  const fetchMessages = () =>
+    supabase
+      .from("messages")
+      .select()
+      .order("created_at", { ascending: true })
+      .returns<Message[]>();
+
+  const addMessages = (messages: Message[]) => {
+    setMessages((prev) => [...prev, ...messages]);
+  };
+
+  useEffect(() => {
+    supabase.auth
+      .getUser()
+      .then((userResponse) => setUser(userResponse.data.user ?? undefined));
+  }, []);
+
+  useEffect(() => {
+    fetchMessages().then(({ data }) => addMessages(data ?? []));
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("new-message")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+        },
+        (data) => {
+          addMessages([data.new as Message]);
+        },
+      )
+      .subscribe();
+
+    return () => void channel.unsubscribe();
+  }, []);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
+    setIsLoading(true);
     e.preventDefault();
     if (!input.trim()) return;
 
     // Add user message
-    const newMessage: Message = {
-      id: crypto.randomUUID(),
+    const newMessage: NewMessage = {
+      sender_name: user?.email,
       text: input,
-      sender: "user",
-      timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, newMessage]);
-
-    // Simulate bot response
-    setTimeout(() => {
-      const botResponse: Message = {
-        id: crypto.randomUUID(),
-        text: "Thanks for your message! This is a simulated response.",
-        sender: "bot",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, botResponse]);
-    }, 1000);
+    await supabase.from("messages").insert(newMessage);
 
     setInput("");
+    setIsLoading(false);
   };
 
   return (
-    <div className="border border-black/10 dark:border-white/20 shadow-lg flex-grow rounded p-4 flex flex-col justify-end gap-4">
+    <div className="border border-black/10 dark:border-white/20 shadow-lg flex-grow rounded p-4 flex flex-col justify-end gap-4 min-w-[90vw] md:min-w-[42rem]">
       <ScrollArea.Root>
         <ScrollArea.Viewport>
           <div className="flex flex-col gap-4">
-            {messages.map((m) => (
-              <div
-                className={twMerge(
-                  "p-2 rounded shadow-lg",
-                  m.sender === "Bob"
-                    ? "bg-green-300 dark:bg-green-600 self-end"
-                    : "bg-blue-300 dark:bg-blue-600 self-start",
-                )}
-                key={m.id}
-              >
-                {m.text}
-              </div>
+            {messages.map((message) => (
+              <MessageItem
+                key={message.id}
+                userId={user?.id}
+                message={message}
+              />
             ))}
-            {true && (
-              <div className="self-center italic text-gray-300 text-sm">
-                AI is typing...
-              </div>
-            )}
           </div>
         </ScrollArea.Viewport>
         <ScrollArea.Scrollbar orientation="vertical">
@@ -120,10 +106,12 @@ export default function Chat() {
         </ScrollArea.Scrollbar>
       </ScrollArea.Root>
 
-      <Form.Root onSubmit={() => {}} className="flex items-center gap-2">
+      <Form.Root onSubmit={handleSubmit} className="flex items-center gap-2">
         <Form.Field name="message" className="flex-grow">
           <Form.Control asChild>
             <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
               placeholder="Type your message..."
               className="w-full border rounded p-2 border-black/10 dark:border-white/20 "
             />
@@ -131,6 +119,7 @@ export default function Chat() {
         </Form.Field>
         <Form.Submit asChild>
           <button
+            disabled={isLoading}
             type="submit"
             className="dark:hover:bg-blue-600 hover:bg-blue-300 p-2 rounded-full"
           >
