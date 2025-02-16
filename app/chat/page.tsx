@@ -32,6 +32,10 @@ export default function Chat() {
   };
 
   useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
     supabase.auth
       .getUser()
       .then((userResponse) => setUser(userResponse.data.user ?? undefined));
@@ -88,9 +92,9 @@ export default function Chat() {
   };
 
   return (
-    <div className="border border-black/10 dark:border-white/20 shadow-lg flex-grow rounded p-4 flex flex-col justify-end gap-4 min-w-[90vw] md:min-w-[42rem]">
+    <div className="border border-black/10 dark:border-white/20 shadow-lg rounded p-4 flex flex-col justify-end gap-4 min-w-[90vw] md:min-w-[42rem]">
       <ScrollArea.Root>
-        <ScrollArea.Viewport>
+        <ScrollArea.Viewport className="max-h-[50vh]">
           <div className="flex flex-col gap-4">
             {messages.map((message) => (
               <MessageItem
@@ -99,6 +103,7 @@ export default function Chat() {
                 message={message}
               />
             ))}
+            <div className="invisible" ref={messagesEndRef} />
           </div>
         </ScrollArea.Viewport>
         <ScrollArea.Scrollbar orientation="vertical">
